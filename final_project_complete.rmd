@@ -1,0 +1,230 @@
+---
+title: "Growth Kinetics and Viability of CHO Cells in Shake Flask Culture"
+author: "Damini Patel"
+date: "December 2025"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+    number_sections: false
+    toc: false
+mainfont: Helvetica
+fontsize: 11pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, message = FALSE, warning = FALSE,
+  fig.width = 6, fig.height = 4
+)
+
+library(tidyverse)
+library(ggplot2)
+
+# Import and clean data
+lonza_raw <- read.csv("lonza_data.csv")
+
+lonza <- lonza_raw %>% 
+  dplyr::rename(
+    condition      = Conditions,
+    pattern        = Pattern,
+    passage_number = Passage.number,
+    work_volume_ml = Working.volume..ml.,
+    agitation_rpm  = Agitation.speed..rpm.,
+    dtime_3L_h     = X3L.Doubling.time..h.,
+    mu_3L_h        = X3L.Growth.Rate..h..1.,
+    vcc1_3L        = X3L.Viable.Cell.Count.1..cells.ml.,
+    vcc2_3L        = X3L.Viable.Cell.Count.2..cells.ml.,
+    n_avg_3L       = X3L.N.Average..cells.ml.,
+    x0_3L          = X3L.X0.Seeding.Density..cells.ml.,
+    viab0_3L       = X3L.Viability.0....,
+    viab_end_3L    = X3L.Viability.end....,
+    gens_3L        = X3L...of.generations,
+    inc_time_3L_h  = X3L.Incubation.Time..h.,
+    r_3L           = X3L.Multiplication.rate.r,
+    dtime_1L_h     = X1L.Doubling.time..h.,
+    mu_1L_h        = X1L.Growth.rate..h..1.,
+    vcc_1L_h       = X1L.Viable.Cell.Count..cells.ml.,
+    x0_1L          = X1L.X0.seeding.density..cells.ml.,
+    inc_time_1L_h  = X1L.Incubation.time..h.,
+    viab0_1L       = X1L.Viability.0....,
+    viab_end_1L    = X1L.Viability.end....,
+    notes          = Notes
+  ) %>% 
+  mutate(
+    pattern     = as.factor(pattern),
+    condition   = as.factor(condition),
+    viab0_3L    = as.numeric(viab0_3L),
+    viab_end_3L = as.numeric(gsub("%","",viab_end_3L)),
+    viab0_1L    = as.numeric(viab0_1L),
+    viab_end_1L = as.numeric(gsub("%","",viab_end_1L))
+  )
+
+# Summary values
+n_cond         <- n_distinct(lonza$condition)
+mean_dt3       <- mean(lonza$dtime_3L_h, na.rm = TRUE)
+sd_dt3         <- sd(lonza$dtime_3L_h, na.rm = TRUE)
+mean_mu3       <- mean(lonza$mu_3L_h, na.rm = TRUE)
+mean_viab0_3   <- mean(lonza$viab0_3L, na.rm = TRUE)
+mean_viabend3  <- mean(lonza$viab_end_3L, na.rm = TRUE)
+
+cor_agit_mu3   <- cor(lonza$agitation_rpm, lonza$mu_3L_h, use = "complete.obs")
+
+pattern_summary <- lonza %>%
+  group_by(pattern) %>%
+  summarise(
+    n_conditions = n(),
+    mean_mu_3L = mean(mu_3L_h, na.rm = TRUE),
+    mean_dtime_3L = mean(dtime_3L_h, na.rm = TRUE),
+    mean_viab_end_3L = mean(viab_end_3L, na.rm = TRUE)
+  )
+
+# Linear model
+lm_mu_simple <- lm(mu_3L_h ~ agitation_rpm, data = lonza) 
+```
+
+# Abstract
+
+Chinese hamster ovary (CHO) cells are a foundational platform for modern biopharmaceutical production, and their growth performance depends strongly on operational parameters such as working volume and agitation speed. In this project, I analyzed a Lonza–UNH shake-flask dataset containing 3 L and 1 L culture conditions to evaluate how these parameters influence specific growth rate, doubling time, and viability. Using R for data cleaning, visualization, and statistical modeling, I generated five figures and a summary table capturing key performance trends. A simple linear model was applied to quantify the association between agitation speed and specific growth rate. Overall, CHO cultures demonstrated high viability (>98%) and consistent doubling times, while agitation speed showed a modest positive association with growth rate. These findings provide a quantitative basis for optimizing shake-flask operation in future CHO cell expansion studies.
+
+
+# Introduction
+
+Chinese hamster ovary (CHO) cells are the dominant mammalian host used in biomanufacturing because of their robustness, ability to grow in suspension, and capacity to produce complex recombinant proteins. Despite their widespread use, CHO cell performance is highly sensitive to culture conditions—including working volume, mixing intensity, dissolved oxygen availability, and media composition. Even relatively small changes in shake-flask operating conditions can alter growth kinetics, viability, and productivity, motivating systematic evaluation of these variables.
+
+In the UNH–Lonza CHO cell coursework, students routinely expand CHO CRL-3440 cells and perform multi-condition shake-flask experiments designed to compare growth performance across volumes and agitation speeds. The dataset analyzed here comes from a previous semester’s multi-condition study and provides an opportunity to apply tools from Data Science for Life Sciences, including data wrangling, visualization, and linear modeling.
+
+The objective of this project was to use R to clean and summarize the dataset, quantify differences in 3 L growth kinetics across conditions, evaluate viability maintenance, visualize relationships between agitation speed and specific growth rate, and apply a simple mathematical model to test whether agitation is predictive of growth performance.
+
+\newpage
+
+# Methods
+
+## Data source and Cleaning
+
+The dataset originated from a Lonza training-lab shake-flask experiment involving CHO CRL-3440 cells cultured in chemically defined media. The base medium used for expansion was HyClone SFM4CHO (Cytiva), a protein-free, chemically defined medium formulated for high-yield CHO suspension culture. SFM4CHO was prepared and supplemented according to the manufacturer's standard guidelines, including L-glutamine and poloxamer 188 additions.
+
+Each “pattern” represented a unique combination of working volume and agitation speed. Measurements included doubling time, specific growth rate (μ), viable cell counts, seeding density, and viability at the beginning and end of each run.
+
+All data cleaning was performed in R version 4.5.1 (R Core Team, 2025). Character variables were converted to numeric where necessary (e.g., percent signs removed from viability values). Pattern and condition identifiers were converted to factor variables.
+
+
+## Statistical and Modeling Approach
+
+Summary statistics were computed for doubling time, specific growth rate, and viability. Five figures were generated: a histogram of doubling times, a scatterplot of growth rate vs agitation speed, a viability comparison plot, a diagnostic plot for the linear model, and a summary table.
+
+To assess whether agitation speed predicts specific growth rate, I applied a simple linear regression model of the form:
+
+$$
+\mu_{3L} = \beta_0 + \beta_1 (\text{agitation speed}) + \varepsilon
+$$ 
+
+Model diagnostics (residual vs fitted values) were examined to confirm reasonable model behavior and to check for obvious violations of linear-model assumptions.
+
+\newpage
+
+# Results
+
+## Overall 3 L Growth Performance
+
+Across the `r n_cond` 3 L conditions, CHO cells exhibited consistent growth performance. 
+The mean doubling time was approximately `r round(mean_dt3,2)` hours, with moderate variation 
+(SD ≈ `r round(sd_dt3,2)`). The average specific growth rate was `r round(mean_mu3,3)` h⁻¹. 
+Viability remained high throughout, with mean initial `r round(mean_viab0_3, 1)`% 
+and final `r round(mean_viabend3, 1)`% values indicating minimal loss of culture health over the course of the runs.
+
+```{r fig-dt-hist, fig.cap="Distribution of 3 L doubling times."}
+
+ggplot(lonza, aes(x = dtime_3L_h)) +
+  geom_histogram(binwidth = 2, fill = "grey", color = "black") +
+  labs(x = "3 L Doubling Time (hours)", y = "Count") +
+  theme_minimal() 
+
+```
+
+Most 3 L doubling times clustered in a relatively narrow range around 20–25 hours, with only a few conditions showing noticeably slower growth. This pattern supports the idea that the base process is fairly robust across the tested operating window.
+
+
+## Relationship Between Agitation Speed and Growth Rate
+
+Specific growth rate showed modest sensitivity to agitation speed. The Pearson correlation between agitation and μ was `r round(cor_agit_mu3,3)`, 
+indicating a modest linear association between these variables.
+
+```{r fig-mu-agit, fig.cap="3 L specific growth rate as a function of agitation speed"} 
+
+ggplot(lonza, aes(x = agitation_rpm, y = mu_3L_h, color = pattern)) +
+  geom_point(size = 3) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "Agitation Speed (rpm)",
+       y = "Specific Growth Rate (h⁻¹)",
+       color = "Pattern") +
+  theme_minimal() 
+
+```
+
+In general, higher agitation speeds tended to be associated with slightly higher specific growth rates, although conditions at the same rpm could still differ in performance. Different patterns (combinations of working volume and agitation) formed partially distinct clusters, suggesting that agitation alone does not fully explain growth behavior and that other process variables also contribute.
+
+
+\newpage
+## Viability Maintenance During Culture
+
+Initial and final viabilities were strongly related, and most conditions maintained very high viability throughout the culture.
+
+```{r fig-viability, fig.cap="Initial versus final 3 L viability."}
+
+ggplot(lonza, aes(x = viab0_3L, y = viab_end_3L)) +
+  geom_point(size = 3) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  labs(x = "Initial Viability (%)",
+       y = "Final Viability (%)") +
+  theme_minimal() 
+
+```
+
+Most points lie near or slightly above the 1:1 dashed line, meaning that viability was generally maintained or even slightly improved over the course of the 3 L culture. Only a few conditions showed noticeable drops in viability. These outliers may correspond to suboptimal mixing, differences in seeding density, or other process-specific factors recorded in the notes.
+
+\newpage
+## Pattern-Level Summary Table
+
+```{r tbl-pattern, results='asis'}
+
+knitr::kable(pattern_summary, 
+             caption= "Summary of 3 L Performance Metrics by Pattern (mean across conditions).")
+
+```
+
+Patterns represent groups of conditions that share similar working volume and agitation settings. Some patterns achieved relatively short mean doubling times while still maintaining high final viability, often close to or above 98%. Others showed slightly slower growth, reinforcing the idea that not all combinations of volume and agitation are equivalent, even when overall viability remains high.
+
+\newpage
+## Model Diagnostics
+```{r fig-diagnostic,fig.cap="Residuals versus fitted values for the linear model of μ ~ agitation speed."}
+
+plot(lm_mu_simple, which = 1) 
+
+```
+
+The residuals-versus-fitted plot did not reveal any strong departures from linearity or obvious heteroscedasticity, suggesting that the simple linear model provides a reasonable first approximation for the relationship between agitation speed and specific growth rate in this dataset.
+
+
+\newpage
+# Discussion
+
+This analysis demonstrates that CHO cells in the Lonza shake-flask study exhibited stable growth and excellent viability across a broad range of operating conditions. Doubling times were tightly grouped around 23 hours, and viability remained above 98% in nearly every condition. These findings indicate that the underlying cultivation process is robust and capable of supporting consistent cell expansion.
+
+The relationship between agitation speed and specific growth rate was modest but biologically reasonable. Increased agitation can enhance oxygen transfer and mixing, which in turn can support faster growth, but culture performance also depended on working volume and other pattern-level factors not fully captured in a single linear predictor. The modeling results support the idea that agitation contributes to growth rate, and the diagnostic plot confirmed that the simple linear model behaves acceptably as an initial quantitative description.
+
+Future analyses could incorporate additional predictors such as seeding density, passage number, or media-related variables, and more flexible models could be used to explore non-linear relationships or interaction effects. Collectively, this work illustrates how data-driven methods can be applied to evaluate bioprocess performance and guide optimization of small-scale CHO culture systems.
+
+
+# Code Availability
+
+All R Markdown source files, analysis scripts, and the Lonza CHO dataset used in this project are available at the following GitHub repository:
+
+**https://github.com/DaminiUNH/Final_Project_Lonza_CHO**
+
+
+# Bibliography
+
+-   Butler, M. (2005). Animal cell cultures: recent achievements and perspectives in the production of biopharmaceuticals. Applied Microbiology and Biotechnology, 68(3), 283–291.
+-   Jayapal, K. P., Wlaschin, K. F., Hu, W.-S., & Yap, M. G. S. (2007). Recombinant protein therapeutics from CHO cells—20 years and counting. Chemical Engineering Progress, 103(10), 40–47.
+-   R Core Team (2025). R: A Language and Environment for Statistical Computing. Version 4.5.1. R Foundation for Statistical Computing.
+- Cytiva. HyClone SFM4CHO Medium: Product Information and Preparation Guide. Cytiva Life Sciences, n.d.
